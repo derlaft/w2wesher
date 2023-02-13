@@ -63,16 +63,22 @@ func (s *State) Run(ctx context.Context) error {
 
 // State holds the configured state of a Wesher Wireguard interface.
 type State struct {
-	iface               string
-	client              *wgctrl.Client
-	OverlayAddr         netip.Addr
-	Port                int
-	PrivKey             wgtypes.Key
-	PubKey              wgtypes.Key
-	overlayPrefix       netip.Prefix
-	state               *networkstate.State
+	// network interface settings
+	iface  string
+	client *wgctrl.Client
+	// wireguard settings
+	privKey             wgtypes.Key
+	pubKey              wgtypes.Key
 	persistentKeepalive *time.Duration
-	forceUpdate         chan struct{}
+	listenPort          int
+	// overlay network address of this node
+	overlayAddr netip.Addr
+	// overlay network prefix
+	overlayPrefix netip.Prefix
+	// state of the whole mesh network
+	state *networkstate.State
+	// peers update channel
+	forceUpdate chan struct{}
 }
 
 // New creates a new Wesher Wireguard state.
@@ -101,9 +107,9 @@ func New(cfg *config.Config, state *networkstate.State) (Adapter, error) {
 	s := State{
 		iface:               c.Interface,
 		client:              client,
-		Port:                c.ListenPort,
-		PrivKey:             privKey,
-		PubKey:              pubKey,
+		listenPort:          c.ListenPort,
+		privKey:             privKey,
+		pubKey:              pubKey,
 		state:               state,
 		persistentKeepalive: c.PersistentKeepalive,
 		forceUpdate:         make(chan struct{}),
@@ -145,7 +151,7 @@ func (s *State) assignOverlayAddr(nodeName string) error {
 
 	log.With("addr", addr).Debug("assigned overlay address")
 
-	s.OverlayAddr = addr
+	s.overlayAddr = addr
 
 	return nil
 }
@@ -167,9 +173,9 @@ func prefixToIPNet(p netip.Prefix) *net.IPNet {
 
 func (s *State) AnnounceInfo() networkstate.WireguardState {
 	return networkstate.WireguardState{
-		PublicKey:    s.PubKey.String(),
-		SelectedAddr: s.OverlayAddr.String(),
-		Port:         s.Port,
+		PublicKey:    s.pubKey.String(),
+		SelectedAddr: s.overlayAddr.String(),
+		Port:         s.listenPort,
 	}
 }
 

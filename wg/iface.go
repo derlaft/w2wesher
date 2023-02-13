@@ -27,7 +27,7 @@ func (s *State) InterfaceUp() error {
 	}
 
 	if err := netlink.AddrReplace(link, &netlink.Addr{
-		IPNet: addrToIPNet(s.OverlayAddr),
+		IPNet: addrToIPNet(s.overlayAddr),
 	}); err != nil {
 		return fmt.Errorf("setting address for %s: %w", s.iface, err)
 	}
@@ -66,8 +66,8 @@ func (s *State) UpdatePeers() error {
 	}
 
 	if err := s.client.ConfigureDevice(s.iface, wgtypes.Config{
-		PrivateKey: &s.PrivKey,
-		ListenPort: &s.Port,
+		PrivateKey: &s.privKey,
+		ListenPort: &s.listenPort,
 		// even if libp2p connection is broken, we want to keep the old peers
 		// to have the best connectivity chances
 		ReplacePeers: false,
@@ -122,7 +122,7 @@ func (s *State) peerConfigs(nodes []networkstate.Info) ([]wgtypes.PeerConfig, er
 			PersistentKeepaliveInterval: s.persistentKeepalive,
 			Endpoint: &net.UDPAddr{
 				IP:   net.ParseIP(node.Addr),
-				Port: s.Port,
+				Port: s.listenPort,
 			},
 			AllowedIPs: []net.IPNet{
 				*addrToIPNet(selectedAddr),
