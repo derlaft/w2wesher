@@ -12,31 +12,13 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
-// InterfaceUp creates and sets up the associated network interface.
+// InterfaceUp creates the interface and routes to the overlay network
 func (s *State) InterfaceUp() error {
 
-	log.Info("InterfaceUp")
+	log.Debug("InterfaceUp")
 
 	if err := netlink.LinkAdd(&netlink.Wireguard{LinkAttrs: netlink.LinkAttrs{Name: s.iface}}); err != nil && !os.IsExist(err) {
 		return fmt.Errorf("creating link %s: %w", s.iface, err)
-	}
-
-	nodes := s.state.Snapshot()
-
-	peerCfgs, err := s.peerConfigs(nodes)
-	if err != nil {
-		return fmt.Errorf("converting received node information to wireguard format: %w", err)
-	}
-
-	if err := s.client.ConfigureDevice(s.iface, wgtypes.Config{
-		PrivateKey: &s.PrivKey,
-		ListenPort: &s.Port,
-		// even if libp2p connection is broken, we want to keep the old peers
-		// to have the best connectivity chances
-		ReplacePeers: false,
-		Peers:        peerCfgs,
-	}); err != nil {
-		return fmt.Errorf("setting wireguard configuration for %s: %w", s.iface, err)
 	}
 
 	link, err := netlink.LinkByName(s.iface)
@@ -71,6 +53,32 @@ func (s *State) InterfaceUp() error {
 	return nil
 }
 
+// UpdatePeers updates the peers configuration
+func (s *State) UpdatePeers() error {
+
+	log.Debug("UpdatePeers")
+
+	nodes := s.state.Snapshot()
+
+	peerCfgs, err := s.peerConfigs(nodes)
+	if err != nil {
+		return fmt.Errorf("converting received node information to wireguard format: %w", err)
+	}
+
+	if err := s.client.ConfigureDevice(s.iface, wgtypes.Config{
+		PrivateKey: &s.PrivKey,
+		ListenPort: &s.Port,
+		// even if libp2p connection is broken, we want to keep the old peers
+		// to have the best connectivity chances
+		ReplacePeers: false,
+		Peers:        peerCfgs,
+	}); err != nil {
+		return fmt.Errorf("setting wireguard configuration for %s: %w", s.iface, err)
+	}
+
+	return nil
+}
+
 // InterfaceDown shuts down the associated network interface.
 func (s *State) InterfaceDown() error {
 	if _, err := s.client.Device(s.iface); err != nil {
@@ -91,19 +99,19 @@ func (s *State) peerConfigs(nodes []networkstate.Info) ([]wgtypes.PeerConfig, er
 
 	for _, node := range nodes {
 
-		a := node.LastAnnounce
+		as := node.LastAnnounce.WireguardState
 
-		if !a.WireguardState.IsValid() {
+		if !as.IsValid() {
 			// have not received an announce from that node just yet
 			continue
 		}
 
-		pubKey, err := wgtypes.ParseKey(a.WireguardState.PublicKey)
+		pubKey, err := wgtypes.ParseKey(as.PublicKey)
 		if err != nil {
 			return nil, fmt.Errorf("parsing wireguard key: %w", err)
 		}
 
-		selectedAddr, err := netip.ParseAddr(node.LastAnnounce.WireguardState.SelectedAddr)
+		selectedAddr, err := netip.ParseAddr(as.SelectedAddr)
 		if err != nil {
 			return nil, fmt.Errorf("parsing selected addr: %w", err)
 		}

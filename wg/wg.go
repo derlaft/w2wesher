@@ -47,7 +47,7 @@ func (s *State) Run(ctx context.Context) error {
 			return nil
 		case <-s.forceUpdate:
 			// force update
-			err := s.InterfaceUp()
+			err := s.UpdatePeers()
 			if err != nil {
 				return err
 			}
