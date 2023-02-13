@@ -1,36 +1,88 @@
-# go-libp2p-pubsub chat with rendezvous example
+# w2wesher
 
-This example project allows multiple peers to chat among each other using go-libp2p-pubsub. 
+`w2wesher` creates and manages an encrypted mesh overlay network across a group of nodes using
+* [wireguard](https://www.wireguard.com/) linux kernel module for communication;
+* [libp2p](https://libp2p.io/) [pubsub](https://docs.libp2p.io/concepts/pubsub/overview/) for peer discovery, NAT traversal, and more.
 
-Peers are discovered using a DHT, so no prior information (other than the rendezvous name) is required for each peer.
+Its main use-case is adding low-maintenance security to public-cloud networks or connecting different cloud providers.
 
-## Running
+## Security warning
 
-Clone this repo, then `cd` into the `examples/pubsub/basic-chat-with-rendezvous` directory:
+**⚠ WARNING**: Unlike with the normal wireguard, you only need the following to access the network:
+* Network `PSK`
+* One peer ID and listen address
 
-```shell
-git clone https://github.com/libp2p/go-libp2p
-cd go-libp2p/examples/pubsub/basic-chat-with-rendezvous
+That effectively means that leaking `PSK` compromises your network. See [security considerations](#security-considerations) for more details.
+
+## Quickstart
+
+0. Before starting:
+   1. make sure the [wireguard](https://www.wireguard.com/) kernel module is available on all nodes. It is bundled with linux newer than 5.6 and can otherwise be installed following the instructions [here](https://www.wireguard.com/install/).
+
+   2. The following ports must be accessible between all nodes (see [configuration options](#configuration-options) to change these):
+      - 10042 TCP (for peering, might be changed to UDP and QUIC)
+      - 10042 UDP (for wireguard)
+
+TODO: intsallation and configuration manual
+
+### Permissions 
+
+Note that `w2wesher` should never be started from a root user. Don't do that ever: there's a lot of third-party and potentially bugged code, which will listen to the whole Internet.
+
+It is required to give the `wesher` binary enough capabilities to manage the `wireguard` interface via:
+```
+# setcap cap_net_admin=eip wesher
 ```
 
-Now you can either run with `go run`, or build and run the binary:
+### (optional) systemd integration
 
-```shell
-go run .
+TODO
 
-# or, build and run separately
-go build .
-./chat
-```
+## Installing from source
 
-To change the topic name, use the `-topic` flag:
+TODO
 
-```shell
-go run . -topic=adifferenttopic
-```
+## Features
 
-Try opening several terminals, each running the app. When you type a message and hit enter in one, it
-should appear in all others that are connected to the same topic.
+The `w2wesher` tool builds a cluster and manages the configuration of wireguard on each node to create peer-to-peer
+connections between all nodes, thus forming a full mesh VPN.
+This approach may not scale for hundreds of nodes (benchmarks accepted 😉), but is sufficiently performant to join
+several nodes across multiple cloud providers, or simply to secure inter-node comunication in a single public-cloud.
 
-To quit, hit `Ctrl-C`.
+### Automatic Key management
 
+TODO
+
+### Automatic IP address management
+
+TODO rewrite the logic, write documentation
+
+### mDNS dscovery (instead of original /etc/hosts modification)
+
+TODO not implemented yet
+
+### Seamless restarts
+
+TODO not implemented yet
+
+## Configuration options
+
+TODO
+
+## Running multiple clusters
+
+TODO
+
+## Security considerations
+
+TODO
+
+## Current known limitations
+
+### Overlay IP collisions
+
+TODO: will be engineered out
+
+### Split-brain
+
+TODO
