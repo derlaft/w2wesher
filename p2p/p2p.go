@@ -77,6 +77,9 @@ func New(cfg *config.Config, state *networkstate.State, wgControl Wireguard) (No
 }
 
 func (w *worker) connect(ctx context.Context, p peer.AddrInfo) {
+	// update network state: maybe addr changed
+	defer w.updateAddrs()
+
 	err := w.newConnectionSem.Acquire(ctx, 1)
 	if err != nil {
 		log.

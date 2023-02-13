@@ -81,18 +81,7 @@ func (w *worker) consumeAnnounces(ctx context.Context) error {
 		w.state.OnAnnounce(m.ReceivedFrom, a)
 
 		// connect to the new peer in a non-blocking way
-		go func() {
-			err := w.host.Connect(ctx, a.AddrInfo)
-			if err != nil {
-				log.
-					With("err", err).
-					Error("could not connect to a new peer")
-				return
-			}
-
-			// update network state: maybe addr changed
-			w.updateAddrs()
-		}()
+		go w.connect(ctx, a.AddrInfo)
 
 	}
 
