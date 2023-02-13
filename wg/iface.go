@@ -65,14 +65,15 @@ func (s *State) UpdatePeers() error {
 		return fmt.Errorf("converting received node information to wireguard format: %w", err)
 	}
 
-	if err := s.client.ConfigureDevice(s.iface, wgtypes.Config{
+	err = s.client.ConfigureDevice(s.iface, wgtypes.Config{
 		PrivateKey: &s.privKey,
 		ListenPort: &s.listenPort,
 		// even if libp2p connection is broken, we want to keep the old peers
 		// to have the best connectivity chances
 		ReplacePeers: false,
 		Peers:        peerCfgs,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("setting wireguard configuration for %s: %w", s.iface, err)
 	}
 
@@ -81,16 +82,21 @@ func (s *State) UpdatePeers() error {
 
 // InterfaceDown shuts down the associated network interface.
 func (s *State) InterfaceDown() error {
-	if _, err := s.client.Device(s.iface); err != nil {
+	_, err := s.client.Device(s.iface)
+	if err != nil {
 		if os.IsNotExist(err) {
-			return nil // device already gone; noop
+			// device already gone; noop
+			return nil
 		}
+
 		return fmt.Errorf("getting device %s: %w", s.iface, err)
 	}
+
 	link, err := netlink.LinkByName(s.iface)
 	if err != nil {
 		return fmt.Errorf("getting link for %s: %w", s.iface, err)
 	}
+
 	return netlink.LinkDel(link)
 }
 
