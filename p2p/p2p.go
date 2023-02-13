@@ -2,7 +2,6 @@ package p2p
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/derlaft/w2wesher/config"
@@ -15,17 +14,15 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/pnet"
 	"github.com/multiformats/go-multiaddr"
+	"golang.org/x/sync/semaphore"
 
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
+const maxParallelConnects = 4
+const connectTimeout = time.Second * 16
+
 var log = logging.Logger("w2wesher:p2p")
-
-var keepaliveMessage = []byte(`keepalive`)
-
-const w2wesherTopicName = "w2w:announces"
-
-const announceTimeout = time.Second * 16
 
 type Node interface {
 	Run(context.Context) error
@@ -47,6 +44,7 @@ type worker struct {
 	bootstrap        []peer.AddrInfo
 	state            *networkstate.State
 	wgControl        Wireguard
+	newConnectionSem *semaphore.Weighted
 }
 
 func New(cfg *config.Config, state *networkstate.State, wgControl Wireguard) (Node, error) {
@@ -74,7 +72,32 @@ func New(cfg *config.Config, state *networkstate.State, wgControl Wireguard) (No
 		bootstrap:        bootstrap,
 		state:            state,
 		wgControl:        wgControl,
+		newConnectionSem: semaphore.NewWeighted(maxParallelConnects),
 	}, nil
+}
+
+func (w *worker) connect(ctx context.Context, p peer.AddrInfo) {
+	err := w.newConnectionSem.Acquire(ctx, 1)
+	if err != nil {
+		log.
+			With("err", err).
+			Error("failed acquire newConnectionSem")
+		return
+	}
+	defer w.newConnectionSem.Release(1)
+
+	// context timeout
+	ctx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+
+	log.With("addr", p).Debug("connecting to the peer")
+	err = w.host.Connect(ctx, p)
+	if err != nil {
+		log.
+			With("addr", p).
+			With("err", err).
+			Error("failed to connect to the peer")
+	}
 }
 
 func (w *worker) updateAddrs() {
@@ -113,36 +136,15 @@ func (w *worker) Run(ctx context.Context) error {
 	}
 	w.host = h
 
-	// initial connect to known peers
-	for _, addr := range w.bootstrap {
-		go func(p peer.AddrInfo) {
-			log.With("addr", p).Debug("connecting to the peer")
-			err := h.Connect(ctx, p)
-			if err != nil {
-				log.
-					With("addr", p).
-					With("err", err).
-					Error("failed to connect to the peer")
-			}
-		}(addr)
-	}
-
-	// initialize gossipsub
-	ps, err := pubsub.NewGossipSub(ctx, h,
-		// this is a small trusted network: enable automatic peer exchange
-		pubsub.WithPeerExchange(true),
-	)
+	err = w.bootstrapOnce(ctx)
 	if err != nil {
 		return err
 	}
-	w.pubsub = ps
 
-	// join announcements
-	topic, err := ps.Join(w2wesherTopicName)
+	err = w.initializePubsub(ctx)
 	if err != nil {
 		return err
 	}
-	w.topic = topic
 
 	log.
 		With("id", h.ID().String()).
@@ -152,122 +154,6 @@ func (w *worker) Run(ctx context.Context) error {
 		New(ctx).
 		Go(w.periodicAnnounce).
 		Go(w.consumeAnnounces).
+		Go(w.periodicBootstrap).
 		Wait()
-}
-
-func (w *worker) consumeAnnounces(ctx context.Context) error {
-
-	// subscribe to the topic
-	sub, err := w.topic.Subscribe()
-	if err != nil {
-		log.
-			With("err", err).
-			Error("failed to subscribe to announcements")
-		return err
-	}
-
-	for {
-		m, err := sub.Next(ctx)
-		if err != nil {
-
-			if errors.Is(err, context.Canceled) {
-				return nil
-			}
-
-			log.
-				With("err", err).
-				Error("could not consume a message")
-			return err
-		}
-
-		if m.ReceivedFrom == w.host.ID() {
-			continue
-		}
-
-		log.
-			With("data", string(m.Message.Data)).
-			Debug("got announcement")
-
-		var a networkstate.Announce
-		err = a.Unmarshal(m.Message.Data)
-		if err != nil {
-			log.
-				With("err", err).
-				Error("could not decode the message")
-			return err
-		}
-
-		// notify live state about the change
-		w.state.OnAnnounce(m.ReceivedFrom, a)
-
-		// connect to the new peer in a non-blocking way
-		go func() {
-			err := w.host.Connect(ctx, a.AddrInfo)
-			if err != nil {
-				log.
-					With("err", err).
-					Error("could not connect to a new peer")
-				return
-			}
-
-			// update network state: maybe addr changed
-			w.updateAddrs()
-		}()
-
-	}
-
-}
-
-func (w *worker) periodicAnnounce(ctx context.Context) error {
-
-	// make a first announce
-	w.announceLocal(ctx)
-
-	t := time.NewTicker(w.announceInterval)
-	defer t.Stop()
-
-	// periodically announce it's own state
-	for {
-		select {
-		case <-t.C:
-			w.announceLocal(ctx)
-			w.updateAddrs()
-		case <-ctx.Done():
-			return nil
-		}
-	}
-
-}
-
-func (w *worker) announceLocal(ctx context.Context) {
-
-	log.Debug("announceLocal")
-
-	ctx, cancel := context.WithTimeout(ctx, announceTimeout)
-	defer cancel()
-
-	a := networkstate.Announce{
-		AddrInfo: peer.AddrInfo{
-			ID:    w.host.ID(),
-			Addrs: w.host.Addrs(),
-		},
-		WireguardState: w.wgControl.AnnounceInfo(),
-	}
-
-	log.With("announce", a).Debug("going to send announce")
-
-	data, err := a.Marshal()
-	if err != nil {
-		log.
-			With("err", err).
-			Error("could not publish keepalive")
-		return
-	}
-
-	err = w.topic.Publish(ctx, data)
-	if err != nil {
-		log.
-			With("err", err).
-			Error("could not publish keepalive")
-	}
 }
