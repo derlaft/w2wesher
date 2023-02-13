@@ -69,6 +69,7 @@ type State struct {
 	Port                int
 	PrivKey             wgtypes.Key
 	PubKey              wgtypes.Key
+	overlayPrefix       netip.Prefix
 	state               *networkstate.State
 	persistentKeepalive *time.Duration
 	forceUpdate         chan struct{}
@@ -92,6 +93,11 @@ func New(cfg *config.Config, state *networkstate.State) (Adapter, error) {
 	}
 	pubKey := privKey.PublicKey()
 
+	prefix, err := netip.ParsePrefix(c.NetworkRange)
+	if err != nil {
+		return nil, fmt.Errorf("parsing CIDR: %w", err)
+	}
+
 	s := State{
 		iface:               c.Interface,
 		client:              client,
@@ -101,19 +107,10 @@ func New(cfg *config.Config, state *networkstate.State) (Adapter, error) {
 		state:               state,
 		persistentKeepalive: c.PersistentKeepalive,
 		forceUpdate:         make(chan struct{}),
+		overlayPrefix:       prefix,
 	}
 
-	name := c.NodeName
-	if name == "" {
-		name, _ = os.Hostname()
-	}
-
-	prefix, err := netip.ParsePrefix(c.NetworkRange)
-	if err != nil {
-		return nil, fmt.Errorf("parsing CIDR: %w", err)
-	}
-
-	if err := s.assignOverlayAddr(prefix, name); err != nil {
+	if err := s.assignOverlayAddr(c.NodeName); err != nil {
 		return nil, fmt.Errorf("assigning overlay address: %w", err)
 	}
 
@@ -125,14 +122,19 @@ func New(cfg *config.Config, state *networkstate.State) (Adapter, error) {
 // provided name deterministically.
 // Currently, the address is assigned by hashing the name and mapping that
 // hash in the target network space.
-func (s *State) assignOverlayAddr(prefix netip.Prefix, name string) error {
-	ip := prefix.Addr().AsSlice()
+func (s *State) assignOverlayAddr(nodeName string) error {
+
+	if nodeName == "" {
+		nodeName, _ = os.Hostname()
+	}
+
+	ip := s.overlayPrefix.Addr().AsSlice()
 
 	h := fnv.New128a()
-	h.Write([]byte(name))
+	h.Write([]byte(nodeName))
 	hb := h.Sum(nil)
 
-	for i := 1; i <= (prefix.Addr().BitLen()-prefix.Bits())/8; i++ {
+	for i := 1; i <= (s.overlayPrefix.Addr().BitLen()-s.overlayPrefix.Bits())/8; i++ {
 		ip[len(ip)-i] = hb[len(hb)-i]
 	}
 
@@ -152,6 +154,14 @@ func addrToIPNet(addr netip.Addr) *net.IPNet {
 	return &net.IPNet{
 		IP:   addr.AsSlice(),
 		Mask: net.CIDRMask(addr.BitLen(), addr.BitLen()),
+	}
+}
+
+func prefixToIPNet(p netip.Prefix) *net.IPNet {
+	addr := p.Addr()
+	return &net.IPNet{
+		IP:   addr.AsSlice(),
+		Mask: net.CIDRMask(p.Bits(), addr.BitLen()),
 	}
 }
 

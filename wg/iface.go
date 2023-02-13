@@ -59,24 +59,13 @@ func (s *State) InterfaceUp() error {
 		return fmt.Errorf("enabling interface %s: %w", s.iface, err)
 	}
 
-	for _, node := range nodes {
-
-		if !node.LastAnnounce.WireguardState.IsValid() {
-			continue
-		}
-
-		selectedAddr, err := netip.ParseAddr(node.LastAnnounce.WireguardState.SelectedAddr)
-		if err != nil {
-			return fmt.Errorf("parsing selected addr: %w", err)
-		}
-
-		if err := netlink.RouteAdd(&netlink.Route{
-			LinkIndex: link.Attrs().Index,
-			Dst:       addrToIPNet(selectedAddr),
-			Scope:     netlink.SCOPE_LINK,
-		}); err != nil && !errors.Is(err, os.ErrExist) {
-			return fmt.Errorf("adding route %s to %s: %w", selectedAddr, s.iface, err)
-		}
+	// add only one route per connection
+	if err := netlink.RouteAdd(&netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Dst:       prefixToIPNet(s.overlayPrefix),
+		Scope:     netlink.SCOPE_LINK,
+	}); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("adding route: %w", err)
 	}
 
 	return nil
