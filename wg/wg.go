@@ -102,15 +102,18 @@ func New(cfg *config.Config, state *networkstate.State) (Adapter, error) {
 	}
 
 	s := State{
-		iface:               c.Interface,
-		client:              client,
-		listenPort:          c.ListenPort,
-		privKey:             privKey,
-		pubKey:              pubKey,
-		state:               state,
-		persistentKeepalive: c.PersistentKeepalive,
-		forceUpdate:         make(chan struct{}),
-		overlayPrefix:       prefix,
+		iface:         c.Interface,
+		client:        client,
+		listenPort:    c.ListenPort,
+		privKey:       privKey,
+		pubKey:        pubKey,
+		state:         state,
+		forceUpdate:   make(chan struct{}),
+		overlayPrefix: prefix,
+	}
+
+	if c.PersistentKeepalive > 0 {
+		s.persistentKeepalive = &c.PersistentKeepalive
 	}
 
 	if err := s.assignOverlayAddr(c.NodeName); err != nil {

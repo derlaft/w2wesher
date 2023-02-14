@@ -75,7 +75,7 @@ type Wireguard struct {
 	NodeName string `validate:"hostname"`
 	// Wireguard PersistentKeepalive setting.
 	// If not present, will not be enabled.
-	PersistentKeepalive *time.Duration
+	PersistentKeepalive time.Duration
 }
 
 func Load(filename string) (*Config, error) {
@@ -207,9 +207,8 @@ func (w *Wireguard) Load() (bool, error) {
 		changed = true
 	}
 
-	if w.PersistentKeepalive == nil {
-		v := DefaultWgPersistentKeepalive
-		w.PersistentKeepalive = &v
+	if w.PersistentKeepalive == 0 {
+		w.PersistentKeepalive = DefaultWgPersistentKeepalive
 		changed = true
 	}
 
