@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"os"
 
 	"github.com/derlaft/w2wesher/config"
 	"github.com/derlaft/w2wesher/networkstate"
@@ -21,6 +22,10 @@ var (
 
 func main() {
 	flag.Parse()
+
+	if os.Getuid() <= 0 || os.Getegid() <= 0 {
+		log.Fatal("w2wesher should never be started from root")
+	}
 
 	state := networkstate.New()
 
