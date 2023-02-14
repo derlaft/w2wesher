@@ -1,0 +1,17 @@
+[Unit]
+Description=w2wesher - wireguard mesh builder
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/w2wesher -config /var/lib/w2wesher/config.ini
+Restart=on-failure
+Type=simple
+DynamicUser=true
+User=w2wesher
+Group=w2wesher
+StateDirectory=w2wesher
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+
+[Install]
+WantedBy = multi-user.target
