@@ -92,7 +92,7 @@ func (w *worker) periodicAnnounce(ctx context.Context) error {
 	// make a first announce
 	w.announceLocal(ctx)
 
-	t := time.NewTicker(w.announceInterval)
+	t := time.NewTicker(w.cfg.P2P.AnnounceInterval)
 	defer t.Stop()
 
 	// periodically announce it's own state

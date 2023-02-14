@@ -19,7 +19,7 @@ import (
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 )
 
-const maxParallelConnects = 4
+const maxParallelConnects = 8
 const connectTimeout = time.Second * 16
 
 var log = logging.Logger("w2wesher:p2p")
@@ -34,17 +34,15 @@ type Wireguard interface {
 }
 
 type worker struct {
-	listenAddr       string
-	announceInterval time.Duration
 	host             host.Host
 	topic            *pubsub.Topic
 	pubsub           *pubsub.PubSub
 	pk               crypto.PrivKey
 	psk              []byte
-	bootstrap        []peer.AddrInfo
 	state            *networkstate.State
 	wgControl        Wireguard
 	newConnectionSem *semaphore.Weighted
+	cfg              *config.Config
 }
 
 func New(cfg *config.Config, state *networkstate.State, wgControl Wireguard) (Node, error) {
@@ -59,17 +57,10 @@ func New(cfg *config.Config, state *networkstate.State, wgControl Wireguard) (No
 		return nil, err
 	}
 
-	bootstrap, err := cfg.P2P.LoadBootstrapPeers()
-	if err != nil {
-		return nil, err
-	}
-
 	return &worker{
-		listenAddr:       cfg.P2P.ListenAddr,
-		announceInterval: cfg.P2P.AnnounceInterval,
+		cfg:              cfg,
 		pk:               pk,
 		psk:              psk,
-		bootstrap:        bootstrap,
 		state:            state,
 		wgControl:        wgControl,
 		newConnectionSem: semaphore.NewWeighted(maxParallelConnects),
@@ -78,6 +69,7 @@ func New(cfg *config.Config, state *networkstate.State, wgControl Wireguard) (No
 
 func (w *worker) connect(ctx context.Context, p peer.AddrInfo) {
 	// update network state: maybe addr changed
+	// TODO: inefficient to call it here?
 	defer w.updateAddrs()
 
 	err := w.newConnectionSem.Acquire(ctx, 1)
@@ -107,7 +99,7 @@ func (w *worker) updateAddrs() {
 	ret := make(map[peer.ID]multiaddr.Multiaddr)
 	n := w.host.Network()
 
-	for _, peer := range n.Peerstore().Peers() {
+	for _, peer := range n.Peers() {
 		for _, addr := range n.ConnsToPeer(peer) {
 			ret[peer] = addr.RemoteMultiaddr()
 
@@ -129,7 +121,7 @@ func (w *worker) Run(ctx context.Context) error {
 
 	h, err := libp2p.New(
 		libp2p.Identity(w.pk),
-		libp2p.ListenAddrStrings(w.listenAddr),
+		libp2p.ListenAddrStrings(w.cfg.P2P.ListenAddr),
 		libp2p.PrivateNetwork(w.psk),
 		libp2p.EnableNATService(),
 		libp2p.NATPortMap(),
@@ -139,12 +131,12 @@ func (w *worker) Run(ctx context.Context) error {
 	}
 	w.host = h
 
-	err = w.bootstrapOnce(ctx)
+	err = w.initializePubsub(ctx)
 	if err != nil {
 		return err
 	}
 
-	err = w.initializePubsub(ctx)
+	err = w.initialBootstrap(ctx)
 	if err != nil {
 		return err
 	}

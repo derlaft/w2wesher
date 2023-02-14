@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/go-playground/validator/v10"
@@ -23,13 +24,14 @@ var validate = validator.New()
 
 // TODO: validate config on load
 type Config struct {
+	filename  string `ini:"-"`
 	P2P       P2P
 	Wireguard Wireguard
 }
 
 const (
 	DefaultP2PListenAddr       = "/ip4/0.0.0.0/udp/10042"
-	DefaultP2PAnnounceInterval = time.Minute * 5
+	DefaultP2PAnnounceInterval = time.Minute
 )
 
 type P2P struct {
@@ -74,22 +76,23 @@ type Wireguard struct {
 	// If not present, will be replaced with a hostname on the first time.
 	NodeName string `validate:"hostname"`
 	// Wireguard PersistentKeepalive setting.
-	// If not present, will not be enabled.
+	// Set to -1 to disable.
 	PersistentKeepalive time.Duration
 }
 
 func Load(filename string) (*Config, error) {
 
 	cfg, err := ini.Load(filename)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("config: cannot parse ini: %w", err)
-		}
+	if os.IsNotExist(err) {
 		cfg = ini.Empty()
+	} else if err != nil {
+		return nil, fmt.Errorf("config: cannot parse ini: %w", err)
 	}
 
 	// Load config from disk
 	var parsed = new(Config)
+	parsed.filename = filename
+
 	err = cfg.MapTo(parsed)
 	if err != nil {
 		return nil, fmt.Errorf("config: cannot map ini: %w", err)
@@ -103,24 +106,34 @@ func Load(filename string) (*Config, error) {
 
 	// Save back to disk if changed
 	if changed {
-		err := ini.ReflectFrom(cfg, parsed)
+		err := parsed.Save()
 		if err != nil {
-			return nil, fmt.Errorf("config: applying ini config: %w", err)
-		}
-
-		var buf = bytes.NewBuffer(nil)
-		_, err = cfg.WriteTo(buf)
-		if err != nil {
-			return nil, fmt.Errorf("config: marshaling ini config: %w", err)
-		}
-
-		err = ioutil.WriteFile(filename, buf.Bytes(), 0600)
-		if err != nil {
-			return nil, fmt.Errorf("config: saving file: %w", err)
+			return nil, fmt.Errorf("config: saving failed: %w", err)
 		}
 	}
 
 	return parsed, nil
+}
+
+func (c *Config) Save() error {
+	cfg := ini.Empty()
+	err := ini.ReflectFrom(cfg, c)
+	if err != nil {
+		return err
+	}
+
+	var buf = bytes.NewBuffer(nil)
+	_, err = cfg.WriteTo(buf)
+	if err != nil {
+		return err
+	}
+
+	err = ioutil.WriteFile(c.filename, buf.Bytes(), 0600)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (c *Config) Load() (bool, error) {
@@ -165,6 +178,9 @@ func (p *P2P) Load() (bool, error) {
 		p.AnnounceInterval = DefaultP2PAnnounceInterval
 		changed = true
 	}
+
+	// make sure bootstrap addr list is always sorted
+	sort.Strings(p.Bootstrap)
 
 	err := validate.Struct(p)
 	if err != nil {
