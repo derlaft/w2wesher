@@ -35,6 +35,32 @@ func (w *worker) initializePubsub(ctx context.Context) error {
 	return nil
 }
 
+func (w *worker) sendWelcomeAnnounces(ctx context.Context) error {
+	h, err := w.topic.EventHandler()
+	if err != nil {
+		return err
+	}
+
+	defer h.Cancel()
+
+	for {
+		ev, err := h.NextPeerEvent(ctx)
+		if err != nil {
+			return err
+		}
+
+		switch ev.Type {
+		case pubsub.PeerJoin:
+			log.With("id", ev.Peer).Debug("peer joined")
+			w.announceLocal(ctx)
+			w.updateAddrs()
+		case pubsub.PeerLeave:
+			log.With("id", ev.Peer).Debug("peer left")
+			w.updateAddrs()
+		}
+	}
+}
+
 func (w *worker) consumeAnnounces(ctx context.Context) error {
 
 	// subscribe to the topic

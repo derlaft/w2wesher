@@ -68,10 +68,6 @@ func New(cfg *config.Config, state *networkstate.State, wgControl Wireguard) (No
 }
 
 func (w *worker) connect(ctx context.Context, p peer.AddrInfo) {
-	// update network state: maybe addr changed
-	// TODO: inefficient to call it here?
-	defer w.updateAddrs()
-
 	err := w.newConnectionSem.Acquire(ctx, 1)
 	if err != nil {
 		log.
@@ -150,5 +146,6 @@ func (w *worker) Run(ctx context.Context) error {
 		Go(w.periodicAnnounce).
 		Go(w.consumeAnnounces).
 		Go(w.periodicBootstrap).
+		Go(w.sendWelcomeAnnounces).
 		Wait()
 }
